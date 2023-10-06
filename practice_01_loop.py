@@ -22,5 +22,9 @@ print(round(result, 2))  # round(값, 소수점 숫자) 함수 -> 반올림
 
 # 문제4) list b에서 최소값 찾기
 b = [22, 1, 4, 7, 98]
+num_min = b[0]
+for i in b:
+    if i < num_min:
+        num_min = i
 
 print(num_min)

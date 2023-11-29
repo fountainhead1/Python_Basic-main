@@ -1,3 +1,9 @@
+# TODO : 1분전 -> 날짜 계산해서 저장(n시간전이라고 써진 것은 이미 완료)
+#      + "조금전"
+# 다음 영화 DATE의 표기법 : 조금전, n분전, n시간전, 현 시각(연월일, 시간:분:초)
+# TODO : 스케줄러 등록(24시간에 한번씩 수집하도록) : 매일 낮 12시
+#        -> 중복 방지를 위해 날짜 비교(DB에 저장된 리뷰의 마지막 날짜보다 큰 애들만 수집)
+
 # SELENIUM
 
 # pip install selenium
@@ -25,6 +31,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from db.movie_dao import add_review
 
 # 1.Selenium 전용 웹 브라우저 구동
 options = Options()
@@ -32,14 +39,14 @@ options.add_experimental_option("detach", True)
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()),
                           options=options)
 # 2.URL 접속
-url = "https://movie.daum.net/moviedb/grade?movieId=169137"
+url = "https://movie.daum.net/moviedb/grade?movieId=146084"
 driver.get(url)
 time.sleep(2)
 
 # 3.페이지 전체 코드 가져오기
 doc_html = driver.page_source
 
-# 4.Selenim → BeautifulSoup
+# 4.Selenium → BeautifulSoup
 doc = BeautifulSoup(doc_html, "html.parser")
 
 # 5.영화 제목 수집
@@ -79,35 +86,48 @@ for i in range(click_cnt):
 doc_html = driver.page_source
 doc = BeautifulSoup(doc_html, "html.parser")
 review_list = doc.select("ul.list_comment > li")
+print(f"= 전체 리뷰: {len(review_list)}건")
 
-print(len(review_list))
-
+# item: 리뷰 1건(평점, 리뷰, 작성자, 작성일자)
+# 반복 1회마다 리뷰 1건씩 수집(e. g. 31개의 리뷰 수집 = 코드 31회 수행)
 for item in review_list:
     print("=" * 100)
     review_score = item.select("div.ratings")[0].get_text()
-    print(f"    - 평점 : {review_score}")
-    review_content = item.select("p.desc_txt")[0].get_text().strip()  # strip : 좌우 여백 제거
-    print(f"    - 내용 : {review_content}")
-    # \n : 한 줄 개행
-    # 수집한 리뷰가 개행 - 문자열 안에 \n이 포함되어 있음
+    print(f"  - 평점: {review_score}")
+    review_content = item.select("p.desc_txt")[0].get_text().strip()
+    # \n : 한 줄 개행 → \n을 제거
     review_content = re.sub("\n", "", review_content)
-    review_writer = item.select("a.link_nick > span")[1].get_text()  # [댓글 작성자, 작성자, 댓글 모아보기] -> [1]로 작성자 가져옴
+    print(f"  - 리뷰: {review_content}")
 
-    #  print(len(review_writer))
-    # 24시간 이내에 작성된 경우 : 21시간 전, 17시간 전 처럼 작성됨
-    # 실제 날짜 표기법 : 2023. 11. 17. 12:15
-    # 21시간 전 -> 2023. 11. 17. 12:15
+    review_writer = item.select("a.link_nick > span")[1].get_text()  # [댓글 작성자, 작성자, 댓글 모아보기]
+    print(f"  - 작성자: {review_writer}")
 
-    # "21시간 전" 처럼 뜨는 경우를 구분해야 함 : 어떻게 찾을 수 있을까? -> "수정 필요" 출력
-    #  = review_date -> 17시간 전 or 2023. 11. 17 12:17
-    if len(review_date) < 7:
-        # 숫자만 추출하는 코드
-        reg_hour = int(re.sub(r"[^~0-9]", "", total_review_date))
-        # 예) 현재 시간 - 17시간(2023.11.17 12:29) - 18 = 2023-11-16 18:29:23.51548
-        review_date = datetime.now() - timedelta(hours=reg_hour)
-        # 예) 날짜 표기법 맞춰주기
+    review_date = item.select("span.txt_date")[0].get_text()
+
+    # 다음 영화리뷰 날짜 표기법 : 4가지
+    # 1. 조금전(현재시간(분) - 1분) 2. x분전(현재시간(분) - x) 3. x시간전(현재시간(시간) - x) 4. 2023. 11. 29. 14:18
+    # 24시간 이내에 작성 된 리뷰의 날짜 → 24시간전, 3시간전 → 다음영화날짜(2023. 11. 17. 2:12)
+    # review_date → 4가지 표기법 중 1개
+    if review_date == "조금전":
+        review_date = datetime.now() - timedelta(minutes=1)  # 현재 시간에서 1분 빼기
         review_date = review_date.strftime("%Y. %m. %d. %H:%M")
-    print(f"    - 날짜 ; {review_date}")
+    # 1분전 ~ 59분전 → "분전"
+    elif review_date[-2:] == "분전":
+        reg_minute = int(re.sub(r"[^~0-9]", "", review_date))
+        review_date = datetime.now() - timedelta(minutes=reg_minute)
+        review_date = review_date.strftime("%Y. %m. %d. %H:%M")
+    # 1시간 ~ 23시간전 → "시간전:
+    elif review_date[-3:] == "시간전":
+        reg_hour = int(re.sub(r"[^~0-9]", "", review_date))
+        review_date = datetime.now() - timedelta(hours=reg_hour)
+        review_date = review_date.strftime("%Y. %m. %d. %H:%M")
 
-    print(f"    - 작성자 : {review_writer}")
-    review_date = item.select("span.txt_date")
+    print(f"  - 날짜: {review_date}")
+
+    # MariaDB 저장
+    #  1) DB에 보낼 데이터 만들기
+    # TIP : key값 → Table의 column(열)과 동일하게 맞추는 것이 좋음
+    data = {
+        "title" : movie_title, "review" : review_content, "score" : review_score, "writer" : review_writer, "reg_date" : review_date
+    }
+    add_review(data)
